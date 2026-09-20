@@ -355,23 +355,33 @@ class _VLLMHijack:
         except Exception:  # noqa: BLE001
             _log.warning("[VIME-ROPE-RESTORE] import failed", exc_info=True)
             return
-        model = worker.model_runner.model
+        model_runner = getattr(worker, "model_runner", None)
+        model = getattr(model_runner, "model", None)
+        if model is None:
+            _log.warning("[VIME-ROPE-RESTORE] worker model not available, skipping restore")
+            return
         inner = getattr(model, "model", None) or model
+        # MLA reads the globals _cos_cache/_sin_cache (NOT the buffer);
+        # _record_cos_and_sin_cache_interleaved is a "record once" no-op once
+        # they are set, so reset to None once before the loop to force
+        # re-record: the first rotary module then re-records, matching the
+        # guard's native first-writer semantics (GLM-4.7-Flash has exactly
+        # one rotary module).
+        asc_rope._cos_cache = None
+        asc_rope._sin_cache = None
+        asc_rope._cos_sin_cache = None
         count = 0
         for mod in inner.modules():
             if not isinstance(mod, RotaryEmbedding):
                 continue
             try:
+                buf = getattr(mod, "cos_sin_cache", None)
+                if buf is None:
+                    continue
                 cache = mod._compute_cos_sin_cache()
-                buf = mod.cos_sin_cache
                 cache = cache.to(device=buf.device, dtype=buf.dtype)
-                buf.data.copy_(cache)
-                # MLA reads the globals _cos_cache/_sin_cache (NOT the buffer);
-                # _record_cos_and_sin_cache_interleaved is a "record once" no-op once
-                # they are set, so reset to None first to force re-record.
-                asc_rope._cos_cache = None
-                asc_rope._sin_cache = None
-                asc_rope._cos_sin_cache = None
+                with torch.no_grad():
+                    buf.copy_(cache)
                 if hasattr(asc_rope, "_record_cos_sin_cache"):
                     asc_rope._record_cos_sin_cache(buf)
                 if hasattr(asc_rope, "_record_cos_and_sin_cache_interleaved"):
