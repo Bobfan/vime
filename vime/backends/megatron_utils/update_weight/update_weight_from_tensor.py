@@ -348,6 +348,7 @@ class _VLLMHijack:
         if os.getenv("VIME_RESTORE_ROPE", "1") not in ("1", "true", "yes"):
             return
         import logging
+
         _log = logging.getLogger(__name__)
         try:
             from vllm.model_executor.layers.rotary_embedding import RotaryEmbedding
@@ -387,7 +388,7 @@ class _VLLMHijack:
                 if hasattr(asc_rope, "_record_cos_and_sin_cache_interleaved"):
                     asc_rope._record_cos_and_sin_cache_interleaved(buf)
                 count += 1
-            except Exception as e:  # noqa: BLE001
+            except Exception:  # noqa: BLE001
                 _log.warning("[VIME-ROPE-RESTORE] failed for a rotary module", exc_info=True)
         _log.info("[VIME-ROPE-RESTORE] recomputed cos_sin_cache for %d rotary module(s)", count)
 
